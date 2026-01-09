@@ -1,0 +1,15 @@
+[submodule "rocket-chip"]
+	path = rocket-chip
+	url = https://github.com/OpenXiangShan-Nanhu/rocket-chip.git
+[submodule "difftest"]
+	path = difftest
+	url = https://github.com/OpenXiangShan-Nanhu/difftest.git
+[submodule "src/main/resources/aia"]
+	path = src/main/resources/aia
+	url = https://github.com/OpenXiangShan/OpenAIA.git
+[submodule "xs-utils"]
+	path = xs-utils
+	url = https://github.com/OpenXiangShan-Nanhu/xs-utils.git
+[submodule "YunSuan"]
+	path = YunSuan
+	url = https://github.com/OpenXiangShan-Nanhu/YunSuan

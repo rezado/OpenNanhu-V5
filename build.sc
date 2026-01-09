@@ -1,0 +1,263 @@
+/***************************************************************************************
+ * Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+ * Copyright (c) 2020-2024 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
+
+import mill._
+import scalalib._
+import $file.`rocket-chip`.common
+import $file.`rocket-chip`.dependencies.cde.common
+import $file.`rocket-chip`.dependencies.hardfloat.common
+import $file.`rocket-chip`.dependencies.diplomacy.common
+
+/* for publishVersion */
+import $ivy.`de.tototec::de.tobiasroeser.mill.vcs.version::0.4.0`
+import de.tobiasroeser.mill.vcs.version.VcsVersion
+import java.io.{BufferedReader, InputStreamReader}
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import scala.util.matching.Regex
+
+val defaultScalaVersion = "2.13.14"
+
+def defaultVersions = Map(
+  "chisel"        -> ivy"org.chipsalliance::chisel:6.7.0",
+  "chisel-plugin" -> ivy"org.chipsalliance:::chisel-plugin:6.5.0",
+  "chiseltest"    -> ivy"edu.berkeley.cs::chiseltest:6.0.0"
+)
+
+trait HasChisel extends SbtModule {
+  def chiselModule: Option[ScalaModule] = None
+
+  def chiselPluginJar: T[Option[PathRef]] = None
+
+  def chiselIvy: Option[Dep] = Some(defaultVersions("chisel"))
+
+  def chiselPluginIvy: Option[Dep] = Some(defaultVersions("chisel-plugin"))
+
+  override def scalaVersion = defaultScalaVersion
+
+  override def scalacOptions = super.scalacOptions() ++
+    Agg("-language:reflectiveCalls", "-Ymacro-annotations", "-Ytasty-reader")
+
+  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get)
+
+  override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
+}
+
+object rocketchip
+  extends millbuild.`rocket-chip`.common.RocketChipModule
+    with HasChisel {
+  def scalaVersion: T[String] = T(defaultScalaVersion)
+
+  override def millSourcePath = os.pwd / "rocket-chip"
+
+  def macrosModule = macros
+
+  def hardfloatModule = hardfloat
+
+  def cdeModule = cde
+
+  def diplomacyModule = diplomacy
+
+  def diplomacyIvy = None
+
+  def mainargsIvy = ivy"com.lihaoyi::mainargs:0.7.0"
+
+  def json4sJacksonIvy = ivy"org.json4s::json4s-jackson:4.0.7"
+
+  object macros extends Macros
+
+  trait Macros
+    extends millbuild.`rocket-chip`.common.MacrosModule
+      with SbtModule {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}"
+  }
+
+  object hardfloat
+    extends millbuild.`rocket-chip`.dependencies.hardfloat.common.HardfloatModule with HasChisel {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    override def millSourcePath = os.pwd / "rocket-chip" / "dependencies" / "hardfloat" / "hardfloat"
+
+  }
+
+  object cde
+    extends millbuild.`rocket-chip`.dependencies.cde.common.CDEModule with ScalaModule {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    override def millSourcePath = os.pwd / "rocket-chip" / "dependencies" / "cde" / "cde"
+  }
+
+  object diplomacy
+    extends millbuild.`rocket-chip`.dependencies.diplomacy.common.DiplomacyModule {
+
+    def scalaVersion: T[String] = T(defaultScalaVersion)
+
+    def chiselModule: Option[ScalaModule] = None
+    def chiselPluginJar: T[Option[PathRef]] = None
+    def chiselIvy: Option[Dep] = Some(defaultVersions("chisel"))
+    def chiselPluginIvy: Option[Dep] = Some(defaultVersions("chisel-plugin"))
+
+    def cdeModule = cde
+    def sourcecodeIvy = ivy"com.lihaoyi::sourcecode:0.3.1"
+    override def millSourcePath = os.pwd / "rocket-chip" / "dependencies" / "diplomacy" / "diplomacy"
+
+  }
+}
+
+object xsutils extends HasChisel {
+
+  override def millSourcePath = os.pwd / "xs-utils"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip
+  )
+
+}
+
+object yunsuan extends HasChisel {
+
+  override def millSourcePath = os.pwd / "YunSuan"
+}
+
+object difftest extends HasChisel {
+
+  override def millSourcePath = os.pwd / "difftest"
+
+}
+
+object macros extends ScalaModule {
+
+  override def millSourcePath = os.pwd / "macros"
+
+  override def scalaVersion: T[String] = T(defaultScalaVersion)
+
+  override def ivyDeps = super.ivyDeps() ++ Agg(ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}")
+
+  def scalaReflectIvy = ivy"org.scala-lang:scala-reflect:${defaultScalaVersion}"
+}
+
+// extends this trait to use XiangShan in other projects
+trait XiangShanModule extends ScalaModule {
+
+  def rocketModule: ScalaModule
+
+  def difftestModule: ScalaModule
+
+  def xsutilsModule: ScalaModule
+
+  def yunsuanModule: ScalaModule
+
+  def macrosModule: ScalaModule
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketModule,
+    difftestModule,
+    yunsuanModule,
+    xsutilsModule,
+    macrosModule,
+  )
+
+  val resourcesPATH = os.pwd.toString() + "/src/main/resources"
+  val envPATH = sys.env("PATH") + ":" + resourcesPATH
+
+  override def forkEnv = Map("PATH" -> envPATH)
+}
+
+object xiangshan extends XiangShanModule with HasChisel {
+
+  override def millSourcePath = os.pwd
+
+  def rocketModule = rocketchip
+
+  def difftestModule = difftest
+
+  def xsutilsModule = xsutils
+
+  def yunsuanModule = yunsuan
+
+  def macrosModule = macros
+
+  override def forkArgs = Seq("-Xmx40G", "-Xss256m")
+
+  override def ivyDeps = super.ivyDeps() ++ Agg(
+    defaultVersions("chiseltest"),
+    ivy"org.chipsalliance:llvm-firtool:1.62.1"
+  )
+
+  override def scalacOptions = super.scalacOptions() ++ Agg("-deprecation", "-feature")
+
+  def publishVersion: T[String] = VcsVersion.vcsState().format(
+    revHashDigits = 8,
+    dirtyHashDigits = 0,
+    commitCountPad = -1,
+    countSep = "",
+    tagModifier = (tag: String) => "[Rr]elease.*".r.findFirstMatchIn(tag) match {
+      case Some(_) => "NanhuV5-Release-" + LocalDateTime.now().format(
+        DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(new Locale("en")))
+      case None => "NanhuV5-dev"
+    },
+    /* add "username, buildhost, buildtime" for non-release version */
+    untaggedSuffix = " (%s@%s) # %s".format(
+      System.getProperty("user.name"),
+      java.net.InetAddress.getLocalHost().getHostName(),
+      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))),
+  )
+
+  def gitStatus: T[String] = {
+    val gitRevParseBuilder = new ProcessBuilder("git", "rev-parse", "HEAD")
+    val gitRevParseProcess = gitRevParseBuilder.start()
+    val shaReader = new BufferedReader(new InputStreamReader(gitRevParseProcess.getInputStream))
+    val sha = shaReader.readLine()
+
+    val gitStatusBuilder = new ProcessBuilder("git", "status", "-uno", "--porcelain")
+    val gitStatusProcess = gitStatusBuilder.start()
+    val gitStatusReader = new BufferedReader(new InputStreamReader(gitStatusProcess.getInputStream))
+    val status = gitStatusReader.readLine()
+    val gitDirty = if (status == null) 0 else 1
+
+    val str =
+      s"""|SHA=$sha
+          |dirty=$gitDirty
+          |""".stripMargin
+    str
+  }
+
+  val pwd = os.pwd
+  def packDifftestResources(destDir: os.Path): Unit = {
+    // package difftest source as resources, only git tracked files were collected
+    val difftest_srcs = os.proc("git", "ls-files").call(cwd = pwd / "difftest").out
+      .text().split("\n").filter(_.nonEmpty).toSeq
+      .map(os.RelPath(_))
+    difftest_srcs.foreach { f =>
+      os.copy(pwd / "difftest" / f, destDir / "difftest-src" / f, createFolders = true)
+    }
+  }
+
+  override def resources = T.sources {
+    os.write(T.dest / "publishVersion", publishVersion())
+    os.write(T.dest / "gitStatus", gitStatus())
+    os.write(T.dest / "gitModules", os.proc("git", "submodule", "status").call().out.text())
+    packDifftestResources(T.dest)
+    super.resources() ++ Seq(PathRef(T.dest))
+  }
+}
