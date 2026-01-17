@@ -41,6 +41,7 @@ import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
 import chisel3.experimental.BundleLiterals._
+import chisel3.util.experimental.BoringUtils
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -286,6 +287,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val snapshots = SnapshotGenerator(snapshotPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
+
+
+  // for DSE
+  val pRobSize = WireInit(0.U(log2Up(RobSize + 1).W))
+  BoringUtils.addSink(pRobSize, "DSE_ROBSIZE")
+  XSError(pRobSize <= RenameWidth.U, "RobSize should be larger than RenameWidth\n")
+  BoringUtils.addSource(io.commits.commitValid(0), "DSE_COMMITVALID")
 
   /**
    * states of Rob
@@ -932,7 +940,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val numValidEntries = distanceBetween(enqPtr, deqPtr)
   val commitCnt = PopCount(io.commits.commitValid)
 
-  allowEnqueue := numValidEntries + dispatchNum <= (RobSize - RenameWidth).U
+  allowEnqueue := numValidEntries + dispatchNum <= (pRobSize - RenameWidth.U).asUInt
 
   val redirectWalkDistance = distanceBetween(io.redirect.bits.robIdx, deqPtrVec_next(0))
   when(io.redirect.valid) {
@@ -1287,7 +1295,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val fuseCommitCnt = PopCount(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => RegEnable(v && CommitType.isFused(i.commitType), isCommit) })
   val trueCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.instrSize, 0.U) }.reduce(_ +& _), isCommit) +& fuseCommitCnt
   val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
-  val instrCnt = instrCntReg + retireCounter
+  val instrCnt = Wire(UInt(64.W))
+  instrCnt := instrCntReg + retireCounter
+  BoringUtils.addSource(instrCnt, "DSE_INSTRCNT")
   when(isCommitReg){
     instrCntReg := instrCnt
   }
@@ -1701,10 +1711,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegEnable(commitStoreVec, isCommit)))),
     ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)),
     ("rob_walkCycle          ", (state === s_walk)),
-    ("rob_1_4_valid          ", numValidEntries <= (RobSize / 4).U),
-    ("rob_2_4_valid          ", numValidEntries > (RobSize / 4).U && numValidEntries <= (RobSize / 2).U),
-    ("rob_3_4_valid          ", numValidEntries > (RobSize / 2).U && numValidEntries <= (RobSize * 3 / 4).U),
-    ("rob_4_4_valid          ", numValidEntries > (RobSize * 3 / 4).U),
+    ("rob_1_4_valid          ", numValidEntries <= (pRobSize / 4.U)                                      ),
+    ("rob_2_4_valid          ", numValidEntries >  (pRobSize / 4.U)   && numValidEntries <= (pRobSize / 2.U)),
+    ("rob_3_4_valid          ", numValidEntries >  (pRobSize / 2.U)   && numValidEntries <= (pRobSize * 3.U / 4.U)),
+    ("rob_4_4_valid          ", numValidEntries >  (pRobSize * 3.U / 4.U)                                ),
   )
   generatePerfEvent()
 
