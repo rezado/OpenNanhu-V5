@@ -1381,6 +1381,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
   XSPerfAccumulate("clock_cycle", 1.U)
+  HardenXSPerfAccumulate("clock_cycle", 1.U)
+  HardenXSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
   QueuePerf(RobSize, numValidEntries, numValidEntries === RobSize.U)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
   XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
