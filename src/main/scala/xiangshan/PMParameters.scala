@@ -42,7 +42,7 @@ case class PMParameters
     PMAConfigEntry(0x80000000000L, c = true, atomic = true, a = 1, x = true, w = true, r = true),
     PMAConfigEntry(0x80000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x3A000000L, a = 1),
-    PMAConfigEntry(0x39002000L, a = 1, w = true, r = true),
+    PMAConfigEntry(0x39003000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x39000000L, a = 1),
     PMAConfigEntry(0x38022000L, a = 1, w = true, r = true),
     PMAConfigEntry(0x38021000L, a = 1, x = true, w = true, r = true),
