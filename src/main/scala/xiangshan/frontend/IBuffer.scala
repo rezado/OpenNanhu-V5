@@ -19,6 +19,7 @@ package xiangshan.frontend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import utils._
 import xs.utils._
@@ -163,6 +164,10 @@ class IBuffer(implicit p: Parameters) extends XSModule
   // io alias
   private val decodeCanAccept = io.decodeCanAccept
 
+  // Dynamic DSE: pIBufSize
+  private val pIBufSize = WireInit(IBufSize.U)
+  BoringUtils.addSink(pIBufSize, "DSE_IBUFSIZE")
+
   // Parameter Check
   private val bankSize = IBufSize / IBufNBank
   require(IBufSize % IBufNBank == 0, s"IBufNBank should divide IBufSize, IBufNBank: $IBufNBank, IBufSize: $IBufSize")
@@ -229,7 +234,7 @@ class IBuffer(implicit p: Parameters) extends XSModule
   val allowEnq = RegInit(true.B)
   val numFromFetch = Mux(io.in.valid, PopCount(io.in.bits.enqEnable), 0.U)
 
-  allowEnq := (IBufSize - PredictWidth).U >= numValidNext // Disable when almost full
+  allowEnq := (pIBufSize - PredictWidth.U) >= numValidNext // Disable when almost full (Dynamic DSE)
 
   val enqOffset = VecInit.tabulate(PredictWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
   val enqData = VecInit.tabulate(PredictWidth)(i => Wire(new IBufEntry).fromFetch(io.in.bits, i))

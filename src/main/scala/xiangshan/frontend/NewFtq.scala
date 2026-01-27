@@ -19,6 +19,7 @@ package xiangshan.frontend
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xiangshan._
 import xiangshan.frontend.icache._
 import xiangshan.backend.CtrlToFtqIO
@@ -468,6 +469,10 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   })
   io.bpuInfo := DontCare
 
+  // Dynamic DSE: pFtqSize
+  private val pFtqSize = WireInit(FtqSize.U)
+  BoringUtils.addSink(pFtqSize, "DSE_FTQSIZE")
+
   val topdown_stage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
   // only driven by clock, not valid-ready
   topdown_stage := io.fromBpu.resp.bits.topdown_info
@@ -556,7 +561,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   // **********************************************************************
   // **************************** enq from bpu ****************************
   // **********************************************************************
-  val new_entry_ready = validEntries < FtqSize.U || canCommit
+  val new_entry_ready = validEntries < pFtqSize || canCommit  // Dynamic DSE: backpressure BPU when FTQ reaches dynamic limit
   io.fromBpu.resp.ready := new_entry_ready
 
   val bpu_s2_resp = io.fromBpu.resp.bits.s2
