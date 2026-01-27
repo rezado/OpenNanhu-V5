@@ -29,6 +29,7 @@ import xs.utils.perf._
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
 import xiangshan.backend.decode.isa.bitfield.{InstVType, XSInstBitFields}
+import chisel3.util.experimental.BoringUtils
 
 class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   with HasDCacheParameters
@@ -146,8 +147,12 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lastCycleRedirect = RegNext(io.redirect_dup(0))
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
 
+  // DSE: Dynamic queue size control
+  val pLoadQueueSize = WireInit(VirtualLoadQueueSize.U(log2Up(VirtualLoadQueueSize + 1).W))
+  BoringUtils.addSink(pLoadQueueSize, "DSE_LQSIZE")
+
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
-  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
+  val allowEnqueue = validCount <= (pLoadQueueSize - LSQLdEnqWidth.U)
   val canEnqueue = io.enq.req.map(_.valid)
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
     uop(i).robIdx.needFlush(io.redirect_dup(0)) && allocated(i)

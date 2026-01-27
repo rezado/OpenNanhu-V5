@@ -31,6 +31,7 @@ import xiangshan.backend.rob.RobLsqIO
 import xiangshan.backend.fu.FuType
 import xiangshan.mem.mdp.MDPResUpdateIO
 import xs.utils.cache.common.{CMOResp, CMOReq}
+import chisel3.util.experimental.BoringUtils
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
@@ -296,10 +297,16 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     val enqLsq = Flipped(new LsqEnqIO)
   })
 
+  // DSE: Dynamic queue size control
+  val pLoadQueueSize = WireInit(VirtualLoadQueueSize.U(log2Up(VirtualLoadQueueSize + 1).W))
+  val pStoreQueueSize = WireInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
+  BoringUtils.addSink(pLoadQueueSize, "DSE_LQSIZE")
+  BoringUtils.addSink(pStoreQueueSize, "DSE_SQSIZE")
+
   val lqPtr = RegInit(0.U.asTypeOf(new LqPtr))
   val sqPtr = RegInit(0.U.asTypeOf(new SqPtr))
-  val lqCounter = RegInit(VirtualLoadQueueSize.U(log2Up(VirtualLoadQueueSize + 1).W))
-  val sqCounter = RegInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
+  val lqCounter = withReset(reset.asBool) { RegInit(pLoadQueueSize) }
+  val sqCounter = withReset(reset.asBool) { RegInit(pStoreQueueSize) }
   val canAccept = RegInit(false.B)
 
   val blockVec = io.enq.iqAccept.map(!_) :+ true.B

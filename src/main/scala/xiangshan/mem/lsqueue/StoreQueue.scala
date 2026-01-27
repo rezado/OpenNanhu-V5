@@ -37,6 +37,7 @@ import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType
 import xiangshan.ExceptionNO._
 import xiangshan.mem.mdp.MDPResUpdateIO
+import chisel3.util.experimental.BoringUtils
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
   p => p(XSCoreParamsKey).StoreQueueSize
@@ -324,8 +325,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val deqPtr = deqPtrExt(0).value
   val cmtPtr = cmtPtrExt(0).value
 
+  // DSE: Dynamic queue size control
+  val pStoreQueueSize = WireInit(StoreQueueSize.U(log2Up(StoreQueueSize + 1).W))
+  BoringUtils.addSink(pStoreQueueSize, "DSE_SQSIZE")
+
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
-  val allowEnqueue = validCount <= (StoreQueueSize - LSQStEnqWidth).U
+  val allowEnqueue = validCount <= (pStoreQueueSize - LSQStEnqWidth.U)
 
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)
