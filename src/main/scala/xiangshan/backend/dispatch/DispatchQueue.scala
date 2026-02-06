@@ -123,6 +123,8 @@ class DispatchQueueIO(enqnum: Int, deqnum: Int, size: Int)(implicit p: Parameter
   val dqFull = Output(Bool())
   val validDeq0Num = Output(UInt(size.U.getWidth.W))
   val validDeq1Num = Output(UInt(size.U.getWidth.W))
+  val numEnq = Output(UInt(64.W))
+  val numDeq = Output(UInt(64.W))
 }
 
 // dispatch queue: accepts at most enqnum uops from dispatch1 and dispatches deqnum uops at every clock cycle
@@ -255,6 +257,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0, instN
     else (!deq.fire && stateEntries(headPtr(i).value) =/= s_invalid) || numDeqTryMask(i)
   } :+ true.B
   val numDeq = PriorityEncoder(deqEnable_n)
+  io.numDeq := numDeq
   // agreement with reservation station: don't dequeue when redirect.valid
   for (i <- 0 until 2 * deqnum) {
     headPtrNext(i) := Mux(io.redirect.valid, headPtr(i), headPtr(i) + numDeq)
@@ -280,6 +283,7 @@ class DispatchQueue(size: Int, enqnum: Int, deqnum: Int, dqIndex: Int = 0, instN
 
   // enqueue
   val numEnq = Mux(io.enq.canAccept, PopCount(io.enq.req.map(_.valid)), 0.U)
+  io.numEnq := numEnq
   val numNeedAlloc = Mux(io.enq.canAccept, PopCount(io.enq.needAlloc), 0.U)
   tailPtr(0) := Mux(io.redirect.valid,
     tailPtr(0),

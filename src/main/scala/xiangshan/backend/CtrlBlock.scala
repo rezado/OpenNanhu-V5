@@ -702,6 +702,9 @@ class CtrlBlockImp(
   io.perfInfo.ctrlInfo.fpdqFull := GatedValidRegNext(vecDq.io.dqFull)
   io.perfInfo.ctrlInfo.lsdqFull := GatedValidRegNext(lsDq.io.dqFull)
 
+  HardenXSPerfAccumulate("intdqreads", intDq0.io.numDeq + intDq1.io.numDeq)
+  HardenXSPerfAccumulate("intdqwrites", intDq0.io.numEnq + intDq1.io.numEnq)
+
   val perfEvents = Seq(decode, rename, dispatch, intDq0, intDq1, vecDq, lsDq, rob).flatMap(_.getPerfEvents)
   generatePerfEvent()
 }

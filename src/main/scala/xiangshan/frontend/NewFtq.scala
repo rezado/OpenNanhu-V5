@@ -1408,6 +1408,7 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
 
   io.bpuInfo.bpRight := PopCount(mbpRights)
   io.bpuInfo.bpWrong := PopCount(mbpWrongs)
+  HardenXSPerfAccumulate("BPWrong", PopCount(mbpWrongs))
 
   val hartId = p(XSCoreParamsKey).HartId
   val enq = io.fromBpu.resp

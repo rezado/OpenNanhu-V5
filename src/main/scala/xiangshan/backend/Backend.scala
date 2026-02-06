@@ -46,7 +46,7 @@ import scala.collection.mutable
 import xs.utils._
 import xs.utils.tl._
 import xs.utils.sram._
-import xs.utils.perf.{DebugOptionsKey, HPerfMonitor, PerfEvent, HasPerfEvents}
+import xs.utils.perf._
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
   with HasXSParameter {
@@ -745,6 +745,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := RegNext(csrio.customCtrl.distribute_csr)
   val csrevents = pfevent.io.hpmevent.slice(8,16)
+
+  // Hardware performance counter: aggregate issue count from all schedulers
+  val totalIssueFireCnt = intScheduler.io.perf.issueFireCnt + vfScheduler.io.perf.issueFireCnt + memScheduler.io.perf.issueFireCnt
+  HardenXSPerfAccumulate("issue_fire_cnt", totalIssueFireCnt)
 
   val ctrlBlockPerf    = ctrlBlock.getPerfEvents
   val intSchedulerPerf = intScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents

@@ -1380,11 +1380,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   def ifCommitReg(counter: UInt): UInt = Mux(isCommitReg, counter, 0.U)
 
   val commitDebugUop = deqPtrVec.map(_.value).map(debug_microOp(_))
+
   XSPerfAccumulate("clock_cycle", 1.U)
   HardenXSPerfAccumulate("clock_cycle", 1.U)
   HardenXSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
   QueuePerf(RobSize, numValidEntries, numValidEntries === RobSize.U)
   XSPerfAccumulate("commitUop", ifCommit(commitCnt))
+  HardenXSPerfAccumulate("commitUop", ifCommit(commitCnt))
+  HardenXSPerfAccumulate("rob_reads", io.commits.hasCommitInstr)
+  HardenXSPerfAccumulate("rob_writes", dispatchNum)
   XSPerfAccumulate("commitInstr", ifCommitReg(trueCommitCnt))
   XSPerfRolling("ipc", ifCommitReg(trueCommitCnt), 1000, clock, reset)
   XSPerfRolling("cpi", perfCnt = 1.U /*Cycle*/ , eventTrigger = ifCommitReg(trueCommitCnt), granularity = 1000, clock, reset)
@@ -1399,6 +1403,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitIsBranch = io.commits.info.map(_.commitType).map(_ === CommitType.BRANCH)
   val commitBranchValid = io.commits.commitValid.zip(commitIsBranch).map { case (v, t) => v && t }
   XSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
+  HardenXSPerfAccumulate("commitInstrBranch", ifCommit(PopCount(commitBranchValid)))
   // val commitLoadWaitBit = commitInfo.map(_.loadWaitBit)
   // XSPerfAccumulate("commitInstrLoadWait", ifCommit(PopCount(commitLoadValid.zip(commitLoadWaitBit).map { case (v, w) => v && w })))
   val commitIsStore = io.commits.info.map(_.commitType).map(_ === CommitType.STORE)
@@ -1487,6 +1492,26 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     XSPerfAccumulate(s"${fuName}_latency_enq_rs_execute", ifCommit(latencySum(commitIsFuType, rsFuLatency)))
     XSPerfAccumulate(s"${fuName}_latency_commit", ifCommit(latencySum(commitIsFuType, commitLatency)))
   }
+
+  // Aggregated hardware performance counters
+  // Integer instructions: jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku, vipu, vialuF, vppu, vimac, vidiv, vsetiwi, vsetiwf, vsetfwf
+  val intFuTypes = Seq(FuType.jmp, FuType.brh, FuType.i2f, FuType.i2v, FuType.csr, FuType.alu, FuType.mul, FuType.div,
+    FuType.fence, FuType.bku, FuType.vipu, FuType.vialuF, FuType.vppu, FuType.vimac, FuType.vidiv,
+    FuType.vsetiwi, FuType.vsetiwf, FuType.vsetfwf)
+  val commitIsInt = intFuTypes.map(fuType =>
+    io.commits.commitValid.zip(commitDebugUop).map(x => x._1 && x._2.fuType === fuType.id.U)
+  ).transpose.map(commitVec => commitVec.reduce(_ || _))
+  HardenXSPerfAccumulate("int_instr_cnts", ifCommit(PopCount(commitIsInt)))
+
+  // Floating-point instructions: f2v, vfalu, vfma, vfdiv, vfcvt
+  val fpFuTypes = Seq(FuType.f2v, FuType.vfalu, FuType.vfma, FuType.vfdiv, FuType.vfcvt)
+  val commitIsFp = fpFuTypes.map(fuType =>
+    io.commits.commitValid.zip(commitDebugUop).map(x => x._1 && x._2.fuType === fuType.id.U)
+  ).transpose.map(commitVec => commitVec.reduce(_ || _))
+  HardenXSPerfAccumulate("fp_instr_cnts", ifCommit(PopCount(commitIsFp)))
+
+  HardenXSPerfAccumulate("load_instr_cnts", ifCommit(PopCount(commitIsLoad)))
+  HardenXSPerfAccumulate("store_instr_cnts", ifCommit(PopCount(commitIsStore)))
   XSPerfAccumulate(s"redirect_use_snapshot", io.redirect.valid && io.snpt.useSnpt)
 
   // top-down info
@@ -1719,6 +1744,79 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_4_4_valid          ", numValidEntries >  (pRobSize * 3.U / 4.U)                                ),
   )
   generatePerfEvent()
+
+  
+  // Performance conters for MCPAT
+  val intRegfileReads_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  val intRegfileWrites_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  val fpRegfileReads_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  val fpRegfileWrites_vec = WireInit(VecInit(Seq.fill(RenameWidth)(0.U(64.W))))
+  io.enq.req.zip(canEnqueue.zipWithIndex).map {
+    case (req, (v, i)) =>
+      val intsrcValid = WireInit(VecInit(Seq.fill(req.bits.srcType.size)(false.B)))
+      val fpsrcValid = WireInit(VecInit(Seq.fill(req.bits.srcType.size)(false.B)))
+
+      // 修改点 1: 不再提取 lsrc，直接遍历 srcType
+      // 修改点 2: 移除 .ctrl，直接访问 req.bits.srcType
+      req.bits.srcType.zipWithIndex.foreach{
+        case (srctype, j) =>
+          // 整数逻辑:
+          // 移除 lsrc =/= 0.U 的判断 (DynInst 无此字段)
+          // 移除 .ctrl
+          intsrcValid(j) := v && srctype === SrcType.reg && j.U =/= 2.U
+
+          // 浮点逻辑:
+          // 移除 .ctrl，直接访问 req.bits.fuType
+          fpsrcValid(j) := v && FuType.isFArith(req.bits.fuType) && srctype === SrcType.fp
+      }
+
+      intRegfileReads_vec(i) := PopCount(intsrcValid)
+      // 修改点 3: 移除 .ctrl，直接访问 rfWen
+      intRegfileWrites_vec(i) := Mux(v && req.bits.rfWen, 1.U, 0.U)
+
+      fpRegfileReads_vec(i) := PopCount(fpsrcValid)
+      // 修改点 4: 移除 .ctrl，直接访问 fpWen
+      fpRegfileWrites_vec(i) := Mux(v && req.bits.fpWen, 1.U, 0.U)
+  }
+
+  io.enq.req.zip(canEnqueue.zipWithIndex).map {
+    case (req, (v, i)) =>
+      val intsrcValid = WireInit(VecInit(Seq.fill(req.bits.srcType.size)(false.B)))
+      val fpsrcValid = WireInit(VecInit(Seq.fill(req.bits.srcType.size)(false.B)))
+      req.bits.srcType.zipWithIndex.foreach{
+        case (srctype, j) =>
+          intsrcValid(j) := v && srctype === SrcType.reg && j.U =/= 2.U
+          fpsrcValid(j) := v && FuType.isFArith(req.bits.fuType) && srctype === SrcType.fp
+      }
+      intRegfileReads_vec(i) := PopCount(intsrcValid)
+      intRegfileWrites_vec(i) := Mux(v && req.bits.rfWen, 1.U, 0.U)
+      fpRegfileReads_vec(i) := PopCount(fpsrcValid)
+      fpRegfileWrites_vec(i) := Mux(v && req.bits.fpWen, 1.U, 0.U)
+  }
+
+  val intRegfileReads = Wire(UInt(64.W))
+  val intRegfileWrites = Wire(UInt(64.W))
+  val fpRegfileReads = Wire(UInt(64.W))
+  val fpRegfileWrites = Wire(UInt(64.W))
+  intRegfileReads := intRegfileReads_vec.reduce(_ + _)
+  intRegfileWrites := intRegfileWrites_vec.reduce(_ + _)
+  fpRegfileReads := fpRegfileReads_vec.reduce(_ + _)
+  fpRegfileWrites := fpRegfileWrites_vec.reduce(_ + _)
+
+  HardenXSPerfAccumulate("intRegfileReads", intRegfileReads)
+  HardenXSPerfAccumulate("intRegfileWrites", intRegfileWrites)
+  HardenXSPerfAccumulate("fpRegfileReads", fpRegfileReads)
+  HardenXSPerfAccumulate("fpRegfileWrites", fpRegfileWrites)
+
+  HardenXSPerfAccumulate("functionCalls", PopCount(commitDebugUop.map(uop => uop.fuOpType === JumpOpType.jal)))
+
+  val intAluAccess = PopCount(io.enq.req.map(r => r.valid && FuType.isInt(r.bits.fuType)))
+  val fpuAccess = PopCount(io.enq.req.map(r => r.valid && FuType.isFArith(r.bits.fuType) ))
+  val mulAccess = PopCount(io.enq.req.map(r => r.valid && (FuType.FuTypeOrR(r.bits.fuType, Seq(FuType.mul, FuType.div)))))
+
+  HardenXSPerfAccumulate("intAluAccess", intAluAccess)
+  HardenXSPerfAccumulate("fpuAccess", fpuAccess)
+  HardenXSPerfAccumulate("mulAccess", mulAccess)
 
   // dontTouch for debug
   if (backendParams.debugEn) {

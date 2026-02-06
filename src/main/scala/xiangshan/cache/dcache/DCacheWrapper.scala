@@ -1570,6 +1570,23 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   io.mshrFull := missQueue.io.full
 
+  // Track load accesses for MCPAT performance counters
+  val ld_access_valid = VecInit(ldu.map(u => RegNext(u.io.lsu.req.fire && !u.io.lsu.s1_kill)))
+  // Track store accesses for MCPAT performance counters
+  val st_access_valid = RegNext(mainPipe.io.store_req.fire)
+
+  // Track write misses: count store/AMO misses entering miss queue from main pipe
+  val write_miss = RegNext(mainPipe.io.miss_req.fire &&
+    (mainPipe.io.miss_req.bits.source === STORE_SOURCE.U ||
+     mainPipe.io.miss_req.bits.source === AMO_SOURCE.U))
+
+  // Performance events for MCPAT
+  HardenXSPerfAccumulate("dcache_read_access", PopCount(ld_access_valid))
+  HardenXSPerfAccumulate("dcache_write_access", st_access_valid)
+  HardenXSPerfAccumulate("dcache_read_miss", PopCount(io.lsu.load.map(x => x.resp.valid && x.resp.bits.miss)))
+  HardenXSPerfAccumulate("dcache_write_miss", write_miss)
+  HardenXSPerfAccumulate("dcache_conflict", mainPipe.io.replace.req.valid)
+
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
   generatePerfEvent()
 }

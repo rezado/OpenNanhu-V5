@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import xs.utils.perf.HasPerfEvents
+import xs.utils.perf._
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -47,6 +47,10 @@ class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends Laz
 class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSBundle {
   // params alias
   private val LoadQueueSize = VirtualLoadQueueSize
+
+  val perf = new Bundle {
+    val issueFireCnt = Output(UInt(64.W))
+  }
 
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
@@ -410,6 +414,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   val lastCycleDp2IqOutFireVec = RegNext(VecInit(dispatch2Iq.io.out.flatten.map(_.fire)))
   val lastCycleIqEnqFireVec    = RegNext(VecInit(issueQueues.map(_.io.enq.map(_.fire)).flatten))
   val lastCycleIqFullVec       = RegNext(VecInit(issueQueues.map(_.io.enq.head.ready)))
+  val lastCycleIssueVec        = RegNext(VecInit(issueQueues.flatMap(_.io.deqDelay.map(_.fire))))
 
   val issueQueueFullVecPerf = issueQueues.zip(lastCycleIqFullVec).zipWithIndex.map{ case ((iq, full),id) =>
     (iq.params.getIQName + s"${id}_full", full)
@@ -418,6 +423,9 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     ("dispatch2Iq_out_fire_cnt", PopCount(lastCycleDp2IqOutFireVec)                 ),
     ("issueQueue_enq_fire_cnt",  PopCount(lastCycleIqEnqFireVec)                    )
   )  ++ issueQueueFullVecPerf
+
+  // Output issue fire count to Backend for aggregation
+  io.perf.issueFireCnt := PopCount(lastCycleIssueVec)
 
   println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
   println(s"[Scheduler] iqWakeUpInKeys: ${iqWakeUpInMap.keys}")
