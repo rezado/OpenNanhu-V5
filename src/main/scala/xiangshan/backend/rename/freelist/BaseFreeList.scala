@@ -24,13 +24,13 @@ import xiangshan.backend.rename.SnapshotGenerator
 import utils._
 import xs.utils._
 import xs.utils.perf._
-import scala.math.max
 
 
-abstract class BaseFreeList(size: Int, numLogicRegs:Int = 32)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+abstract class BaseFreeList(size: Int, numLogicRegs:Int = 32)(implicit p: Parameters) extends XSModule with HasResizeCircularQueuePtrHelper {
   val io = IO(new Bundle {
     val redirect = Input(Bool())
     val walk = Input(Bool())
+    val psize = Input(UInt(log2Up(size + 1).W))
 
     val allocateReq = Input(Vec(RenameWidth, Bool()))
     val walkReq = Input(Vec(RabCommitWidth, Bool()))
@@ -48,38 +48,58 @@ abstract class BaseFreeList(size: Int, numLogicRegs:Int = 32)(implicit p: Parame
     val debug_rat = if(backendParams.debugEn) Some(Vec(numLogicRegs, Input(UInt(PhyRegIdxWidth.W)))) else None
   })
 
-  class FreeListPtr extends CircularQueuePtr[FreeListPtr](size)
+  class FreeListPtr extends ResizeCircularQueuePtr[FreeListPtr](size)
 
   object FreeListPtr {
     def apply(f: Boolean, v: Int): FreeListPtr = {
       val ptr = Wire(new FreeListPtr)
       ptr.flag := f.B
       ptr.value := v.U
+      ptr.psize.valid := false.B
+      ptr.psize.bits := size.U
       ptr
     }
   }
 
-  val lastCycleRedirect = GatedValidRegNext(io.redirect, false.B)
+  protected def withPSize(ptr: FreeListPtr): FreeListPtr = {
+    val sizedPtr = WireInit(ptr)
+    sizedPtr.psize.valid := true.B
+    sizedPtr.psize.bits := io.psize
+    sizedPtr
+  }
+
+  protected def ptrToOH(ptr: FreeListPtr): UInt = withPSize(ptr).toOH
+
+  protected def resizedTailPtr(flag: Boolean): FreeListPtr = {
+    val ptr = Wire(new FreeListPtr)
+    ptr.flag := flag.B
+    ptr.value := Mux(io.psize === 0.U, 0.U, io.psize - 1.U)
+    ptr.psize.valid := true.B
+    ptr.psize.bits := io.psize
+    ptr
+  }
+
+  val lastPSize = RegNext(io.psize, size.U(log2Up(size + 1).W))
+  val psizeChanged = lastPSize =/= io.psize
+  val redirectOrResize = io.redirect || psizeChanged
+
+  XSError(io.psize === 0.U, "FreeList logical size should not be zero\n")
+  XSError(io.psize > size.U, p"FreeList logical size should not exceed physical size ${size.U}\n")
+
+  val lastCycleRedirect = GatedValidRegNext(redirectOrResize, false.B)
   val lastCycleSnpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
 
   val headPtr = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))
   val archHeadPtr = RegInit(FreeListPtr(false, 0))
-  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
-  val headPtrOHShift = CircularShift(headPtrOH)
-  // may shift [0, RenameWidth] steps
-  val headPtrOHVec = VecInit.tabulate(max(RenameWidth, RabCommitWidth) + 1)(headPtrOHShift.left)
+  XSError(ptrToOH(headPtr) =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
 
-  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec)
+  val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, redirectOrResize, io.snpt.flushVec)
 
   val redirectedHeadPtr = Mux(
     lastCycleSnpt.useSnpt,
-    snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq),
-    archHeadPtr + PopCount(io.walkReq)
+    withPSize(snapshots(lastCycleSnpt.snptSelect)) + PopCount(io.walkReq),
+    withPSize(archHeadPtr) + PopCount(io.walkReq)
   )
-  val redirectedHeadPtrOH = Mux(
-    lastCycleSnpt.useSnpt,
-    (snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq)).toOH,
-    (archHeadPtr + PopCount(io.walkReq)).toOH
-  )
+  val redirectedHeadPtrOH = ptrToOH(redirectedHeadPtr)
 }

@@ -19,6 +19,7 @@ package xiangshan.backend.rename
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.BoringUtils
 import xs.utils._
 import xs.utils.perf._
 import utils._
@@ -100,11 +101,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
+  val pIntFreeListSize = WireInit(IntPhyRegs.U(log2Up(IntPhyRegs + 1).W))
+  BoringUtils.addSink(pIntFreeListSize, "DSE_INTFLSIZE")
+  XSError(pIntFreeListSize < 32.U, "IntFreeListSize should be at least 32\n")
+
   val intFreeList = Module(new MEFreeList(IntPhyRegs))
   val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs - FpLogicRegs, VecLogicRegs + FpLogicRegs, Reg_V, 31 + 32))
   val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, 1))
   val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, 1))
 
+  intFreeList.io.psize := pIntFreeListSize
+  vecFreeList.io.psize := (VfPhyRegs - VecLogicRegs - FpLogicRegs).U
+  v0FreeList.io.psize := (V0PhyRegs - V0LogicRegs).U
+  vlFreeList.io.psize := (VlPhyRegs - VlLogicRegs).U
 
   intFreeList.io.commit    <> io.rabCommits
   intFreeList.io.debug_rat.foreach(_ <> io.debug_int_rat.get)
