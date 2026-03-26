@@ -166,7 +166,9 @@ case class XSCoreParameters
     numWrite = None,
   ),
   vfPreg: VfPregParams = VfPregParams(
-    numEntries = 160,
+    // Keep enough elaboration-time capacity for the largest DSE FPPHYREGS point:
+    // VecLogicRegs(32 + 15 tmp) + FpLogicRegs(32) + max dynamic fp free list size(96).
+    numEntries = 175,
     numRead = None,
     numWrite = None,
   ),

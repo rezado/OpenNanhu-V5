@@ -104,6 +104,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val pIntFreeListSize = WireInit(IntPhyRegs.U(log2Up(IntPhyRegs + 1).W))
   BoringUtils.addSink(pIntFreeListSize, "DSE_INTFLSIZE")
   XSError(pIntFreeListSize < 32.U, "IntFreeListSize should be at least 32\n")
+  val pFpFreeListSize = WireInit((VfPhyRegs - VecLogicRegs - FpLogicRegs).U(log2Up(VfPhyRegs - VecLogicRegs - FpLogicRegs + 1).W))
+  BoringUtils.addSink(pFpFreeListSize, "DSE_FPFLSIZE")
+  XSError(pFpFreeListSize < 32.U, "FpFreeListSize should be at least 32\n")
 
   val intFreeList = Module(new MEFreeList(IntPhyRegs))
   val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs - FpLogicRegs, VecLogicRegs + FpLogicRegs, Reg_V, 31 + 32))
@@ -111,7 +114,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, 1))
 
   intFreeList.io.psize := pIntFreeListSize
-  vecFreeList.io.psize := (VfPhyRegs - VecLogicRegs - FpLogicRegs).U
+  vecFreeList.io.psize := pFpFreeListSize
   v0FreeList.io.psize := (V0PhyRegs - V0LogicRegs).U
   vlFreeList.io.psize := (VlPhyRegs - VlLogicRegs).U
 
